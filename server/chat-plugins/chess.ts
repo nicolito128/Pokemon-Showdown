@@ -80,7 +80,6 @@ class ChessBoard {
         this.whitePieces = this.setPiece(this.whitePieces, 5, PieceType.Bishop);
 
         this.whitePieces = this.setPiece(this.whitePieces, 3, PieceType.Queen);
-
         this.whitePieces = this.setPiece(this.whitePieces, 4, PieceType.King);
     }
 
@@ -99,7 +98,6 @@ class ChessBoard {
         this.blackPieces = this.setPiece(this.blackPieces, 61, PieceType.Bishop);
 
         this.blackPieces = this.setPiece(this.blackPieces, 59, PieceType.Queen);
-
         this.blackPieces = this.setPiece(this.blackPieces, 60, PieceType.King);
     }
 
@@ -110,9 +108,7 @@ class ChessBoard {
     }
 
     private removePiece(board: bigint, position: number): bigint {
-        // Remover el bit de ocupación
         board = board & ~(1n << BigInt(position));
-        // Remover los bits del tipo de pieza
         board = board & ~(0b111n << BigInt(position * 3 + 64));
         return board;
     }
@@ -150,10 +146,10 @@ class ChessBoard {
         const blackOccupied = this.isOccupiedBy(position, 'black');
 
         if (whiteOccupied) {
-            const type = Number((this.whitePieces >> BigInt(index * 3 + 64)) & 0b111n);
+            const type = Number((this.whitePieces >> BigInt(index * 3 + 64)) & 0b111n) as PieceType;
             return { type, position, color: 'white', symbol: this.getPieceSymbol(type, 'white') };
         } else if (blackOccupied) {
-            const type = Number((this.blackPieces >> BigInt(index * 3 + 64)) & 0b111n);
+            const type = Number((this.blackPieces >> BigInt(index * 3 + 64)) & 0b111n) as PieceType;
             return { type, position, color: 'black', symbol: this.getPieceSymbol(type, 'black') };
         } else {
             return null;
