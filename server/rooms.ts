@@ -103,6 +103,7 @@ export interface RoomSettings {
 	filterCaps?: boolean;
 	filterLinks?: boolean;
 	jeopardyDisabled?: boolean;
+	chessDisabled?: boolean
 	mafiaDisabled?: boolean;
 	unoDisabled?: boolean;
 	hangmanDisabled?: boolean;
