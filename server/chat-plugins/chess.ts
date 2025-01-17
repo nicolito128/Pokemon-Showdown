@@ -7,19 +7,27 @@
  * 
  * @author n128
 */
+
+// Color type for the pieces and sides
 type Color = 'white' | 'black';
+// Position with scientific notation (a1, b2, ..., h8)
 type Position = `${'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h'}${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+// Coordinates for the board. Ex. (0, 0) is the top left corner. They could be converted to positions or indexes.
 type Coord = { row: number, col: number };
 
 // TypeScript black magic for no-enum-PieceType and GameStatus
-type PieceType = 0b001 | 0b010 | 0b011 | 0b100 | 0b101 | 0b110;
+type PieceType = 0b0001 | 0b0010 | 0b0011 | 0b0100 | 0b0101 | 0b0110 | 0b0111 | 0b1000 | 0b1001;
 const PieceType = Object.freeze({
-    Pawn: 0b001,
-    Rook: 0b010,
-    Knight: 0b011,
-    Bishop: 0b100,
-    Queen: 0b101,
-    King: 0b110,
+    Pawn: 0b0001,
+    Rook: 0b0010,
+    Knight: 0b0011,
+    Bishop: 0b0100,
+    Queen: 0b0101,
+    King: 0b0110,
+    // Special states
+    PawnEnPassent: 0b0111,
+    KingCastle: 0b1000,
+    RookCastle: 0b1001,
 });
 
 type GameStatus = 'active' | 'checkmate' | 'stalemate' | 'draw';
@@ -60,9 +68,25 @@ function coordinatesToIndex(coord: Coord): number {
     return coord.row * 8 + coord.col;
 }
 
+/**
+ * Chess Board
+ * 
+ * Represents a chess board with the current distribution of the pieces
+ * and the logic to move them.
+ * 
+ * The state for black and white pieces are stored in two bigints, a bit field
+ * where each segment represents a square on the board.
+ * 
+ * More info: https://en.wikipedia.org/wiki/Bit_field
+*/
 class ChessBoard {
+    // Representes the current distribution of the whites pieces on the board.
     private whitePieces: bigint;
+    // Representes the current distribution of the black pieces on the board.
     private blackPieces: bigint;
+    // Offset for the piece type in the bit field. Ex. 0b0001 is a pawn with an offset of 4 bits.
+    private bitOffset = 4;
+    private maxBinary = 0b1111n;
 
     constructor() {
         this.whitePieces = 0n;
@@ -72,6 +96,7 @@ class ChessBoard {
         this.initializeBlackPieces();
     }
 
+    // initializeWhitePieces sets the initial distribution of the white pieces on the board.
     private initializeWhitePieces() {
         for (let i = 8; i < 16; i++) {
             this.whitePieces = this.setPiece(this.whitePieces, i, PieceType.Pawn);
@@ -90,6 +115,7 @@ class ChessBoard {
         this.whitePieces = this.setPiece(this.whitePieces, 4, PieceType.King);
     }
 
+    // initializeBlackPieces sets the initial distribution of the black pieces on the board.
     private initializeBlackPieces() {
         for (let i = 48; i < 56; i++) {
             this.blackPieces = this.setPiece(this.blackPieces, i, PieceType.Pawn);
@@ -108,18 +134,26 @@ class ChessBoard {
         this.blackPieces = this.setPiece(this.blackPieces, 60, PieceType.King);
     }
 
+    // calculateBitLength calculates the length of the bit field for the board.
+    private calculateBitLength(position: number): bigint {
+        return BigInt(position * this.bitOffset + 64);
+    }
+
+    // setPiece sets a piece on the board at the specified index position.
     private setPiece(board: bigint, position: number, type: PieceType): bigint {
         board = board | (1n << BigInt(position));
-        board = board | (BigInt(type) << BigInt(position * 3 + 64));
+        board = board | (BigInt(type) << this.calculateBitLength(position));
         return board;
     }
 
+    // removePiece removes a piece from the board at the specified index position.
     private removePiece(board: bigint, position: number): bigint {
         board = board & ~(1n << BigInt(position));
-        board = board & ~(0b111n << BigInt(position * 3 + 64));
+        board = board & ~(this.maxBinary << this.calculateBitLength(position));
         return board;
     }
 
+    // isOccupiedBy checks if the position is occupied by a piece of the specified color.
     private isOccupiedBy(position: Position, color: Color): boolean {
         let board: bigint;
         if (color === 'white') {
@@ -133,6 +167,9 @@ class ChessBoard {
         return !!((board >> BigInt(index)) & 1n);
     }
 
+    // getPieceSymbol returns the symbol for the specified piece type and color.
+    // Symbols for white pieces are uppercase and lowercase for black pieces.
+    // Ex. 'P' for white pawn and 'p' for black
     private getPieceSymbol(type: number, color: Color): string {
         const symbols: { [key: number]: string } = {
             [PieceType.Pawn]: 'P',
@@ -141,37 +178,46 @@ class ChessBoard {
             [PieceType.Bishop]: 'B',
             [PieceType.Queen]: 'Q',
             [PieceType.King]: 'K',
+            [PieceType.PawnEnPassent]: 'P',
+            [PieceType.KingCastle]: 'K',
+            [PieceType.RookCastle]: 'R',
         };
         const symbol = symbols[type];
         return color === 'white' ? symbol : symbol.toLowerCase();
     }
 
+    // getPieceAt returns the piece at the specified position if it exists.
     private getPieceAt(position: Position): Piece | null {
         const coord = positionToCoordinates(position);
         const index = coordinatesToIndex(coord);
         const whiteOccupied = this.isOccupiedBy(position, 'white');
         const blackOccupied = this.isOccupiedBy(position, 'black');
+        const bitPos = this.calculateBitLength(index)
 
         if (whiteOccupied) {
-            const type = Number((this.whitePieces >> BigInt(index * 3 + 64)) & 0b111n) as PieceType;
+            const type = Number((this.whitePieces >> bitPos) & this.maxBinary) as PieceType;
             return { type, position, color: 'white', symbol: this.getPieceSymbol(type, 'white') };
         } else if (blackOccupied) {
-            const type = Number((this.blackPieces >> BigInt(index * 3 + 64)) & 0b111n) as PieceType;
+            const type = Number((this.blackPieces >> bitPos) & this.maxBinary) as PieceType;
             return { type, position, color: 'black', symbol: this.getPieceSymbol(type, 'black') };
         } else {
             return null;
         }
     }
 
+    // isEmpty checks if the position is empty.
     private isEmpty(position: Position): boolean {
         return this.getPieceAt(position) === null;
     }
 
+    // isEnemy checks if the position is occupied by an enemy piece (different color).
     private isEnemy(position: Position, color: Color): boolean {
         const piece = this.getPieceAt(position);
         return piece !== null && piece.color !== color;
     }
 
+    // getPawnMoves returns the possible moves for a pawn at the specified position.
+    // The pawn can move forward, capture diagonally and move two squares on the first move.
     private getPawnMoves(position: Position, color: Color): Position[] {
         const moves: Position[] = [];
         const { row, col } = positionToCoordinates(position);
@@ -181,8 +227,10 @@ class ChessBoard {
         // Move forward
         if (this.isEmpty(coordinatesToPosition({ row: row + direction, col }))) {
             moves.push(coordinatesToPosition({ row: row + direction, col }));
-            if (row === startRow && this.isEmpty(coordinatesToPosition({ row: row + 2 * direction, col }))) {
-                moves.push(coordinatesToPosition({ row: row + 2 * direction, col }));
+
+            const pos2 = coordinatesToPosition({ row: row + 2 * direction, col })
+            if (row === startRow && this.isEmpty(pos2)) {
+                moves.push(pos2);
             }
         }
 
@@ -197,6 +245,8 @@ class ChessBoard {
         return moves;
     }
 
+    // getRookMoves returns the possible moves for a rook at the specified position.
+    // The rook can move horizontally and vertically until it finds a piece or the board limits.
     private getRookMoves(position: Position, color: Color): Position[] {
         const moves: Position[] = [];
         const { row, col } = positionToCoordinates(position);
@@ -242,6 +292,8 @@ class ChessBoard {
         return moves;
     }
 
+    // getKnightMoves returns the possible moves for a knight at the specified position.
+    // The knight can move in an L shape, two squares in one direction and one square in the other.
     private getKnightMoves(position: Position, color: Color): Position[] {
         const moves: Position[] = [];
         const { row, col } = positionToCoordinates(position);
@@ -268,6 +320,8 @@ class ChessBoard {
         return moves;
     }
 
+    // getBishopMoves returns the possible moves for a bishop at the specified position.
+    // The bishop can move diagonally until it finds a piece or the board limits.
     private getBishopMoves(position: Position, color: Color): Position[] {
         const moves: Position[] = [];
         const { row, col } = positionToCoordinates(position);
@@ -313,10 +367,15 @@ class ChessBoard {
         return moves;
     }
 
+    // getQueenMoves returns the possible moves for a queen at the specified position.
+    // The queen can move horizontally, vertically and diagonally until it finds a piece or the board limits.
     private getQueenMoves(position: Position, color: Color): Position[] {
         return [...this.getRookMoves(position, color), ...this.getBishopMoves(position, color)];
     }
 
+    // getKingMoves returns the possible moves for a king at the specified position.
+    // The king can move one square in any direction.
+    // TODO: Add castling
     private getKingMoves(position: Position, color: Color): Position[] {
         const moves: Position[] = [];
         const { row, col } = positionToCoordinates(position);
@@ -343,6 +402,9 @@ class ChessBoard {
         return moves;
     }
 
+    // movePiece moves a piece from the from position to the to position.
+    // It returns true if the move was successful.
+    // TODO: Add en passant check
     public movePiece(from: Position, to: Position): boolean {
         const fromCoords = positionToCoordinates(from);
         const toCoords = positionToCoordinates(to);
@@ -368,6 +430,7 @@ class ChessBoard {
         return true
     }
 
+    // getLegalMoves returns the possible moves for the piece at the specified position.
     public getLegalMoves(position: Position): Position[] {
         const coord = positionToCoordinates(position);
         const pos = coord.row * 8 + coord.col;
@@ -378,30 +441,39 @@ class ChessBoard {
             return [];
         }
 
+        const bitOffset = this.calculateBitLength(pos)
         const pieceType = whiteOccupied
-            ? Number((this.whitePieces >> BigInt(pos * 3 + 64)) & 0b111n)
-            : Number((this.blackPieces >> BigInt(pos * 3 + 64)) & 0b111n);
+            ? Number((this.whitePieces >> bitOffset) & this.maxBinary)
+            : Number((this.blackPieces >> bitOffset) & this.maxBinary);
 
         const color: Color = whiteOccupied ? 'white' : 'black';
 
-        switch (pieceType) {
+        const piece = this.getPieceAt(position);
+        if (piece === null) return [];
+
+        switch (piece.type) {
             case PieceType.Pawn:
-                return this.getPawnMoves(position, color);
+            case PieceType.PawnEnPassent:
+                return this.getPawnMoves(position, piece.color);
             case PieceType.Rook:
-                return this.getRookMoves(position, color);
+            case PieceType.RookCastle:
+                return this.getRookMoves(position, piece.color);
             case PieceType.Knight:
-                return this.getKnightMoves(position, color);
+                return this.getKnightMoves(position, piece.color);
             case PieceType.Bishop:
-                return this.getBishopMoves(position, color);
+                return this.getBishopMoves(position, piece.color);
             case PieceType.Queen:
-                return this.getQueenMoves(position, color);
+                return this.getQueenMoves(position, piece.color);
             case PieceType.King:
-                return this.getKingMoves(position, color);
+            case PieceType.KingCastle:
+                return this.getKingMoves(position, piece.color);
             default:
                 return [];
         }
     }
 
+    // TODO: confirmar que la nueva casilla no este siendo atacada
+    // canCastle checks if the king and the rook can castle.
     public canCastle(color: Color, side: 'king' | 'queen'): boolean {
         const row = color === 'white' ? 0 : 7;
         const kingPos = coordinatesToPosition({row, col: 4});
@@ -436,6 +508,7 @@ class ChessBoard {
         return true;
     }
 
+    // isEnPassant checks if the move is an en passant move.
     public isEnPassant(from: Position, to: Position): boolean {
         const fromPiece = this.getPieceAt(from);
         const toPiece = this.getPieceAt(to);
@@ -446,12 +519,21 @@ class ChessBoard {
         return Math.abs(fromCoord.row - toCoord.row) === 2;
     }
 
+    // isCapture checks if the move is a capture move.
     public isCapture(from: Position, to: Position): boolean {
         const fromPiece = this.getPieceAt(from);
         const toPiece = this.getPieceAt(to);
         return toPiece !== null && toPiece.color !== fromPiece?.color;
     }
 
+    // isPromotion checks if the move is a promotion move.
+    public isPromotion(from: Position, to: Position): boolean {
+        const fromPiece = this.getPieceAt(from);
+        const toCoord = positionToCoordinates(to);
+        return fromPiece?.type === PieceType.Pawn && (toCoord.row === 0 || toCoord.row === 7);
+    }
+
+    // capturePiece removes the piece at the specified position.
     public capturePiece(position: Position): boolean {
         const coord = positionToCoordinates(position);
         const index = coordinatesToIndex(coord);
@@ -467,8 +549,27 @@ class ChessBoard {
         return false;
     }
 
+    // promotion promotes a pawn to the specified piece type.
+    public promotion(from: Position, to: Position, type: PieceType): boolean {
+        const fromPiece = this.getPieceAt(from);
+        if (!fromPiece || fromPiece.type !== PieceType.Pawn) return false;
+
+        const coord = positionToCoordinates(to);
+        const index = coordinatesToIndex(coord);
+
+        if (fromPiece.color === 'white') {
+            this.whitePieces = this.removePiece(this.whitePieces, index);
+            this.whitePieces = this.setPiece(this.whitePieces, index, type);
+        } else {
+            this.blackPieces = this.removePiece(this.blackPieces, index);
+            this.blackPieces = this.setPiece(this.blackPieces, index, type);
+        }
+
+        return true;
+    }
+
+    // isKingInCheck checks if any opponent piece can move to the king's position.
     public isKingInCheck(kingPosition: Position, color: Color): boolean {
-        // Check if any opponent piece can move to the king's position
         const opponentColor = color === 'white' ? 'black' : 'white';
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
@@ -504,6 +605,14 @@ class ChessBoard {
         return this.isKingInCheck(kingPosition, color);
     }
 
+    public isCheckmate(kingPosition: Position, color: Color): boolean {
+        if (!this.isKingInCheck(kingPosition, color)) return false;
+
+        const legalMoves = this.getLegalMoves(kingPosition);
+        return legalMoves.length === 0;
+    }
+
+    // getDistribution returns the distribution of the pieces on the board in an array of strings.
     public getDistribution(): string[] {
         const dist: string[] = [];
         for (let row = 7; row >= 0; row--) {
