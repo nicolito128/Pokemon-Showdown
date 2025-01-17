@@ -566,16 +566,12 @@ export const commands: Chat.ChatCommands = {
 	chesshelp: [
         `/chess challenge [user], [long|action|quick|blitz] - challenge an user to a chess game on the specified time modality.`,
         `/chess challenge accept [user] - `,
-        `/chess board - displays the board of your current game.`,
-        `/chess timer - displays the timers of your current game.`,
         `/chess forfeit - `,
         `/chess offertie - `,
         `/chess accepttie -`,
         `/chess piece [piece] - gives information on the specified chess piece.`,
         `/chess move [old position], [new position] - `,
-        `/chess watch [game], [on|off] - spectate or unspectate a chess game.`,
-        `/chess disqualify [game], [player] - disqualifies a player from a chess game.`,
-        `/chess end [game] - ends a specific chess game abruptly. Requires: % @ # ~`,
+        `/chess promote [position], [type]`,
     ]
 }
 
