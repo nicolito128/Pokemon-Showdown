@@ -8,13 +8,11 @@
  * @author n128
 */
 type Color = 'white' | 'black';
-
 type Position = `${'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h'}${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
 type Coord = { row: number, col: number };
 
-// TypeScript black magic for no-enum-PieceType
+// TypeScript black magic for no-enum-PieceType and GameStatus
 type PieceType = 0b001 | 0b010 | 0b011 | 0b100 | 0b101 | 0b110;
-
 const PieceType = Object.freeze({
     Pawn: 0b001,
     Rook: 0b010,
@@ -24,13 +22,19 @@ const PieceType = Object.freeze({
     King: 0b110,
 });
 
-type Piece = { type: PieceType, color: Color, position: Position, symbol: string }
+type GameStatus = 'active' | 'checkmate' | 'stalemate' | 'draw';
+const GameStatus = Object.freeze({
+    Active: 'active',
+    Checkmate: 'checkmate',
+    Stalemate: 'stalemate',
+    Draw: 'draw',
+});
 
-enum GameStatus {
-    Active = 'active',
-    Checkmate = 'checkmate',
-    Stalemate = 'stalemate',
-    Draw = 'draw',
+type Piece = {
+    color: Color,
+    type: PieceType,
+    position: Position,
+    symbol: string
 }
 
 function positionToCoordinates(position: Position): Coord {
