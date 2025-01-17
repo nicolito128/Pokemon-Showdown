@@ -12,14 +12,17 @@ type Color = 'white' | 'black';
 type Position = `${'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h'}${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
 type Coord = { row: number, col: number };
 
-enum PieceType {
-    Pawn = 0b001,
-    Rook = 0b010,
-    Knight = 0b011,
-    Bishop = 0b100,
-    Queen = 0b101,
-    King = 0b110,
-}
+// TypeScript black magic for no-enum-PieceType
+type PieceType = 0b001 | 0b010 | 0b011 | 0b100 | 0b101 | 0b110;
+
+const PieceType = Object.freeze({
+    Pawn: 0b001,
+    Rook: 0b010,
+    Knight: 0b011,
+    Bishop: 0b100,
+    Queen: 0b101,
+    King: 0b110,
+});
 
 type Piece = { type: PieceType, color: Color, position: Position, symbol: string }
 
