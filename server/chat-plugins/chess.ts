@@ -96,42 +96,33 @@ class ChessBoard {
         this.initializeBlackPieces();
     }
 
-    // initializeWhitePieces sets the initial distribution of the white pieces on the board.
-    private initializeWhitePieces() {
-        for (let i = 8; i < 16; i++) {
-            this.whitePieces = this.setPiece(this.whitePieces, i, PieceType.Pawn);
+    // initializePieces sets the pieces on the board for the specified color.
+    private initializePieces(color: Color) {
+        const isWhite = color === 'white';
+        const startRow = isWhite ? 0 : 7;
+        const pawnRow = isWhite ? 1 : 6;
+        const board = isWhite ? this.whitePieces : this.blackPieces;
+
+        for (let i = 0; i < 8; i++) {
+            this.setPiece(board, pawnRow * 8 + i, PieceType.Pawn);
         }
-        
-        this.whitePieces = this.setPiece(this.whitePieces, 0, PieceType.Rook);
-        this.whitePieces = this.setPiece(this.whitePieces, 7, PieceType.Rook);
 
-        this.whitePieces = this.setPiece(this.whitePieces, 1, PieceType.Knight);
-        this.whitePieces = this.setPiece(this.whitePieces, 6, PieceType.Knight);
-
-        this.whitePieces = this.setPiece(this.whitePieces, 2, PieceType.Bishop);
-        this.whitePieces = this.setPiece(this.whitePieces, 5, PieceType.Bishop);
-
-        this.whitePieces = this.setPiece(this.whitePieces, 3, PieceType.Queen);
-        this.whitePieces = this.setPiece(this.whitePieces, 4, PieceType.King);
+        this.setPiece(board, startRow * 8 + 0, PieceType.Rook);
+        this.setPiece(board, startRow * 8 + 7, PieceType.Rook);
+        this.setPiece(board, startRow * 8 + 1, PieceType.Knight);
+        this.setPiece(board, startRow * 8 + 6, PieceType.Knight);
+        this.setPiece(board, startRow * 8 + 2, PieceType.Bishop);
+        this.setPiece(board, startRow * 8 + 5, PieceType.Bishop);
+        this.setPiece(board, startRow * 8 + 3, PieceType.Queen);
+        this.setPiece(board, startRow * 8 + 4, PieceType.King);
     }
 
-    // initializeBlackPieces sets the initial distribution of the black pieces on the board.
+    private initializeWhitePieces() {
+        this.initializePieces('white');
+    }
+
     private initializeBlackPieces() {
-        for (let i = 48; i < 56; i++) {
-            this.blackPieces = this.setPiece(this.blackPieces, i, PieceType.Pawn);
-        }
-
-        this.blackPieces = this.setPiece(this.blackPieces, 56, PieceType.Rook);
-        this.blackPieces = this.setPiece(this.blackPieces, 63, PieceType.Rook);
-
-        this.blackPieces = this.setPiece(this.blackPieces, 57, PieceType.Knight);
-        this.blackPieces = this.setPiece(this.blackPieces, 62, PieceType.Knight);
-
-        this.blackPieces = this.setPiece(this.blackPieces, 58, PieceType.Bishop);
-        this.blackPieces = this.setPiece(this.blackPieces, 61, PieceType.Bishop);
-
-        this.blackPieces = this.setPiece(this.blackPieces, 59, PieceType.Queen);
-        this.blackPieces = this.setPiece(this.blackPieces, 60, PieceType.King);
+        this.initializePieces('black');
     }
 
     // calculateBitLength calculates the length of the bit field for the board.
@@ -616,17 +607,14 @@ class ChessBoard {
     public getDistribution(): string[] {
         const dist: string[] = [];
         for (let row = 7; row >= 0; row--) {
+            let rowString = '';
             for (let col = 0; col < 8; col++) {
                 const position = coordinatesToPosition({ row, col });
                 const piece = this.getPieceAt(position);
-                if (piece) {
-                    dist.push(piece.symbol);
-                } else {
-                    dist.push('.');
-                }
+                rowString += piece ? piece.symbol : '.';
             }
+            dist.push(rowString);
         }
-
         return dist;
     }
 }
