@@ -7,6 +7,7 @@
  * 
  * @author n128
 */
+import { Utils } from "../../lib";
 
 // Color type for the pieces and sides
 type Color = 'white' | 'black';
@@ -30,8 +31,9 @@ const PieceType = Object.freeze({
     RookCastle: 0b1001,
 });
 
-type GameStatus = 'active' | 'checkmate' | 'stalemate' | 'draw';
-const GameStatus = Object.freeze({
+type GameState = 'prepared' | 'active' | 'checkmate' | 'stalemate' | 'draw';
+const GameState = Object.freeze({
+    Prepared: 'prepared',
     Active: 'active',
     Checkmate: 'checkmate',
     Stalemate: 'stalemate',
@@ -87,10 +89,13 @@ class ChessBoard {
     // Offset for the piece type in the bit field. Ex. 0b0001 is a pawn with an offset of 4 bits.
     private bitOffset = 4;
     private maxBinary = 0b1111n;
+    // Bit field for the pawns that can be captured en passant.
+    private pawnsEnPassent: bigint;
 
     constructor() {
         this.whitePieces = 0n;
         this.blackPieces = 0n;
+        this.pawnsEnPassent = 0n;
 
         this.initializeWhitePieces();
         this.initializeBlackPieces();
@@ -134,6 +139,7 @@ class ChessBoard {
 
     // calculateBitLength calculates the length of the bit field for the board.
     private calculateBitLength(position: number): bigint {
+        if (Number.isNaN(position)) return 0n;
         return BigInt(position * this.bitOffset + 64);
     }
 
@@ -152,7 +158,7 @@ class ChessBoard {
     }
 
     // isOccupiedBy checks if the position is occupied by a piece of the specified color.
-    private isOccupiedBy(position: Position, color: Color): boolean {
+    isOccupiedBy(position: Position, color: Color): boolean {
         let board: bigint;
         if (color === 'white') {
             board = this.whitePieces;
@@ -162,13 +168,15 @@ class ChessBoard {
 
         const coord = positionToCoordinates(position);
         const index = coordinatesToIndex(coord);
+        if (Number.isNaN(index)) return false;
+
         return !!((board >> BigInt(index)) & 1n);
     }
 
     // getPieceSymbol returns the symbol for the specified piece type and color.
     // Symbols for white pieces are uppercase and lowercase for black pieces.
     // Ex. 'P' for white pawn and 'p' for black
-    private getPieceSymbol(type: number, color: Color): string {
+    getPieceSymbol(type: number, color: Color): string {
         const symbols: { [key: number]: string } = {
             [PieceType.Pawn]: 'P',
             [PieceType.Rook]: 'R',
@@ -185,7 +193,7 @@ class ChessBoard {
     }
 
     // getPieceAt returns the piece at the specified position if it exists.
-    private getPieceAt(position: Position): Piece | null {
+    getPieceAt(position: Position): Piece | null {
         const coord = positionToCoordinates(position);
         const index = coordinatesToIndex(coord);
         const whiteOccupied = this.isOccupiedBy(position, 'white');
@@ -204,12 +212,12 @@ class ChessBoard {
     }
 
     // isEmpty checks if the position is empty.
-    private isEmpty(position: Position): boolean {
+    isEmpty(position: Position): boolean {
         return this.getPieceAt(position) === null;
     }
 
     // isEnemy checks if the position is occupied by an enemy piece (different color).
-    private isEnemy(position: Position, color: Color): boolean {
+    isEnemy(position: Position, color: Color): boolean {
         const piece = this.getPieceAt(position);
         return piece !== null && piece.color !== color;
     }
@@ -403,7 +411,7 @@ class ChessBoard {
     // movePiece moves a piece from the from position to the to position.
     // It returns true if the move was successful.
     // TODO: Add en passant check
-    public movePiece(from: Position, to: Position): boolean {
+    movePiece(from: Position, to: Position): boolean {
         const fromCoords = positionToCoordinates(from);
         const toCoords = positionToCoordinates(to);
         
@@ -425,11 +433,28 @@ class ChessBoard {
             this.blackPieces = this.setPiece(this.blackPieces, toIndex, piece.type);
         }
 
+        // Set en passent for pawn movement
+        if (piece.type === PieceType.Pawn && Math.abs(fromCoords.row - toCoords.row) === 2) {
+            this.pawnsEnPassent = this.setPiece(this.pawnsEnPassent, toIndex, piece.type);
+            return true
+        }
+
+        // Check if the move is a capture en passent from to
+        if (this.isEnPassant(from, to)) {
+            const enPassentPos = coordinatesToPosition({row: fromCoords.row, col: toCoords.col});
+            this.capturePiece(enPassentPos);
+            this.pawnsEnPassent = 0n;
+            return true;
+        }
+
+        // Clear en passent board
+        this.pawnsEnPassent = 0n;
+
         return true
     }
 
     // getLegalMoves returns the possible moves for the piece at the specified position.
-    public getLegalMoves(position: Position): Position[] {
+    getLegalMoves(position: Position): Position[] {
         const coord = positionToCoordinates(position);
         const pos = coord.row * 8 + coord.col;
 
@@ -472,7 +497,7 @@ class ChessBoard {
 
     // TODO: confirmar que la nueva casilla no este siendo atacada
     // canCastle checks if the king and the rook can castle.
-    public canCastle(color: Color, side: 'king' | 'queen'): boolean {
+    canCastle(color: Color, side: 'king' | 'queen'): boolean {
         const row = color === 'white' ? 0 : 7;
         const kingPos = coordinatesToPosition({row, col: 4});
         const rookPos = side === 'king'
@@ -503,11 +528,17 @@ class ChessBoard {
         // Check if the king is in check
         if (this.isKingInCheck(kingPos, color)) return false;
 
+        // Check if the new position is being attacked
+        const newKingPos = side === 'king'
+            ? coordinatesToPosition({row, col: 6})
+            : coordinatesToPosition({row, col: 2});
+        if (this.isKingInCheck(newKingPos, color)) return false;
+
         return true;
     }
 
-    // isEnPassant checks if the move is an en passant move.
-    public isEnPassant(from: Position, to: Position): boolean {
+    // isEnPassant checks if the move is an en passant capture move.
+    isEnPassant(from: Position, to: Position): boolean {
         const fromPiece = this.getPieceAt(from);
         const toPiece = this.getPieceAt(to);
         if (fromPiece?.type !== PieceType.Pawn || toPiece !== null) return false;
@@ -518,21 +549,21 @@ class ChessBoard {
     }
 
     // isCapture checks if the move is a capture move.
-    public isCapture(from: Position, to: Position): boolean {
+    isCapture(from: Position, to: Position): boolean {
         const fromPiece = this.getPieceAt(from);
         const toPiece = this.getPieceAt(to);
         return toPiece !== null && toPiece.color !== fromPiece?.color;
     }
 
     // isPromotion checks if the move is a promotion move.
-    public isPromotion(from: Position, to: Position): boolean {
+    isPromotion(from: Position, to: Position): boolean {
         const fromPiece = this.getPieceAt(from);
         const toCoord = positionToCoordinates(to);
         return fromPiece?.type === PieceType.Pawn && (toCoord.row === 0 || toCoord.row === 7);
     }
 
     // capturePiece removes the piece at the specified position.
-    public capturePiece(position: Position): boolean {
+    capturePiece(position: Position): boolean {
         const coord = positionToCoordinates(position);
         const index = coordinatesToIndex(coord);
 
@@ -548,7 +579,7 @@ class ChessBoard {
     }
 
     // promotion promotes a pawn to the specified piece type.
-    public promotion(from: Position, to: Position, type: PieceType): boolean {
+    promotion(from: Position, to: Position, type: PieceType): boolean {
         const fromPiece = this.getPieceAt(from);
         if (!fromPiece || fromPiece.type !== PieceType.Pawn) return false;
 
@@ -567,7 +598,7 @@ class ChessBoard {
     }
 
     // isKingInCheck checks if any opponent piece can move to the king's position.
-    public isKingInCheck(kingPosition: Position, color: Color): boolean {
+    isKingInCheck(kingPosition: Position, color: Color): boolean {
         const opponentColor = color === 'white' ? 'black' : 'white';
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
@@ -584,7 +615,7 @@ class ChessBoard {
         return false;
     }
 
-    public isColorInCheck(color: Color): boolean {
+    isColorInCheck(color: Color): boolean {
         // Find the position of the king
         let kingPosition: Position | null = null;
         for (let row = 0; row < 8; row++) {
@@ -603,7 +634,7 @@ class ChessBoard {
         return this.isKingInCheck(kingPosition, color);
     }
 
-    public isCheckmate(kingPosition: Position, color: Color): boolean {
+    isCheckmate(kingPosition: Position, color: Color): boolean {
         if (!this.isKingInCheck(kingPosition, color)) return false;
 
         const legalMoves = this.getLegalMoves(kingPosition);
@@ -611,7 +642,7 @@ class ChessBoard {
     }
 
     // getDistribution returns the distribution of the pieces on the board in an array of strings.
-    public getDistribution(): string[] {
+    getDistribution(): string[] {
         const dist: string[] = [];
         for (let i = 0; i < 8; i++) {
             for (let j = 0; j < 8; j++) {
@@ -629,39 +660,321 @@ class ChessBoard {
     }
 }
 
-class ChessPlayer extends Rooms.RoomGamePlayer {}
+class ChessPlayer extends Rooms.RoomGamePlayer {
+    side: Color;
+	chess: ChessGame;
+	user: User;
+	wantsTie = false;
+	stale = false;
+	piecesTaken: string[] = [];
+	elo = 0;
 
-class ChessGame extends Rooms.GameRoom {}
+    constructor(user: User, game: ChessGame) {
+        super(user, game);
+        this.side = 'white';
+        this.chess = game;
+        this.user = user
+    }
+
+    send(message: string) {
+		this.user.sendTo(this.game.room, message);
+	}
+
+	sendControls(html: string) {
+		this.send(`|controlshtml|${html}`);
+	}
+
+    oppositeSide() {
+        return this.side === 'white' ? 'black' : 'white';
+    }
+
+    toString(): ID {
+        return this.user.id;
+    }
+}
+
+class ChessGame extends Rooms.RoomGame {
+	gameid = 'chess' as ID;
+	title = 'Chess';
+    turn: string;
+	sides: {[side: string]: ChessPlayer};
+	playerTable: {[k: string]: ChessPlayer};
+	history: string[];
+	board: ChessBoard;
+    players: ChessPlayer[];
+	state: GameState;
+	check: {[side: string]: boolean};
+
+    constructor(room: Room) {
+        super(room);
+        this.turn = '';
+        this.sides = {};
+        this.playerTable = {};
+        this.players = [];
+        this.history = [];
+        this.board = new ChessBoard();
+        this.state = GameState.Prepared;
+        this.check = {};
+    }
+
+    onJoin(user: User) {
+        this.sendBoardTo(user);
+	}
+
+    onConnect(user: User) {
+		this.onJoin(user);
+	}
+
+    addPlayer(user: User): ChessPlayer | null {
+        if (this.players.length === 2) return null;
+
+		const player = this.makePlayer(user);
+        if (this.players.length === 1) {
+            player.side = this.players[0].oppositeSide();
+        }
+
+		this.players.push(player);
+		this.playerTable[user.id] = player;
+		this.sides[player.side] = player;
+
+		return player;
+	}
+
+    makePlayer(user: User) {
+		return new ChessPlayer(user, this);
+	}
+
+    getPlayer(user: User): ChessPlayer {
+		const player = this.playerTable[user.id];
+		if (!player) throw new Chat.ErrorMessage(`You are not a player in the current game of Chess.`);
+		return player;
+	}
+
+    sendBoardTo(user: User) {
+		if (this.playerTable[user.id]) {
+			user.sendTo(this.room.roomid, `|fieldhtml|${this.getBoard(this.playerTable[user.id].side)}`);
+		} else {
+			user.sendTo(this.room.roomid, `|fieldhtml|${this.getBoard()}`);
+		}
+	}
+
+    sendBoard() {
+        for (const player of this.players) {
+            this.sendBoardTo(player.user);
+        }
+    }
+
+    sendBoarForPosition(player: ChessPlayer, pos: Position) {
+        if (this.playerTable[player.id]) {
+            const board = this.getBoardWithMoves(player.side, pos)
+            player.user.sendTo(this.room.roomid, `|fieldhtml|${board}`)
+        }
+    }
+
+    getBoard(side: Color = 'white'): string {
+        const distribution = this.board.getDistribution();
+        const letters = 'abcdefgh';
+        let buf = '<center><table border=1 style="text-align: center; margin: auto; margin-top: 10px;">';
+
+        // Add the letters of the columns
+        buf += '<tr><td></td>';
+        for (let i = 0; i < 8; i++) {
+            buf += `<td style="min-height: 32px; min-width: 32px;">${letters[i]}</td>`;
+        }
+        buf += '</tr>';
+
+        for (let i = 0; i < 8; i++) {
+            buf += '<tr>';
+            // Add the number of the row
+            buf += `<td style="min-height: 32px; min-width: 32px;">${i + 1}</td>`;
+            
+            for (let j = 0; j < 8; j++) {
+                const elem = distribution[i * 8 + j];
+                buf += `<td style="min-height: 32px; min-width: 32px;">`;
+                buf += `<button style="min-height: 32px; min-width: 32px;" name="send" value="/chess legal ${coordinatesToPosition({row: i, col: j})}">`;
+                buf += ChessGame.convertLetterToChessSymbol(elem);
+                buf += '</button>'
+                buf += '</td>';
+            }
+            buf += '</tr>';
+        }
+        buf += '</table></center>';
+        return buf
+    }
+
+    getBoardWithMoves(side: Color, pos: Position): string {
+        const legalMoves = this.board.getLegalMoves(pos);
+        const distribution = this.board.getDistribution();
+        const letters = 'abcdefgh';
+        let buf = '<center><table border=1 style="text-align: center; margin: auto; margin-top: 10px;">';
+
+        // Add the letters of the columns
+        buf += '<tr><td></td>';
+        for (let i = 0; i < 8; i++) {
+            buf += `<td style="min-height: 32px; min-width: 32px;">${letters[i]}</td>`;
+        }
+        buf += '</tr>';
+
+        for (let i = 0; i < 8; i++) {
+            buf += '<tr>';
+            // Add the number of the correct row
+            buf += `<td style="min-height: 32px; min-width: 32px;">${i + 1}</td>`;
+
+            for (let j = 0; j < 8; j++) {
+                const elem = distribution[i * 8 + j];
+                buf += `<td style="min-height: 32px; min-width: 32px;">`;
+                // Change button if is a legal move
+                if (legalMoves.includes(coordinatesToPosition({row: i, col: j}))) {
+                    buf += `<button style="min-height: 32px; min-width: 32px; background-color: green;" name="send" value="/chess legal ${coordinatesToPosition({row: i, col: j})}">`;
+                } else {
+                    buf += `<button style="min-height: 32px; min-width: 32px; name="send" value="/chess legal ${coordinatesToPosition({row: i, col: j})}">`;
+                }
+                
+                buf += ChessGame.convertLetterToChessSymbol(elem);
+                buf += '</button>'
+                buf += '</td>';
+            }
+            buf += '</tr>';
+        }
+        buf += '</table></center>';
+        return buf
+    }
+
+    add(message: string, isHTML = true) {
+		return this.room?.add(`${isHTML ? `|html|` : ''}${message}`).update();
+	}
+
+	addControls(message: string) {
+		this.room.add(`|controlshtml|${message}`).update();
+	}
+
+    move(player: ChessPlayer, from: Position, to: Position) {
+        const fromCoord = positionToCoordinates(from);
+        const toCoord = positionToCoordinates(to);
+        const fromPos = coordinatesToPosition(fromCoord);
+        const toPos = coordinatesToPosition(toCoord);
+
+        if (!this.board.getLegalMoves(fromPos).includes(toPos)) {
+            throw new Chat.ErrorMessage(`Invalid move from ${from} to ${to}.`);
+        }
+
+        const fromPiece = this.board.getPieceAt(fromPos);
+        const toPiece = this.board.getPieceAt(toPos);
+
+        if (fromPiece === null) {
+            throw new Chat.ErrorMessage(`There is no piece at ${from}.`);
+        }
+
+        if (fromPiece.color !== player.side) {
+            throw new Chat.ErrorMessage(`It's not your turn to move.`);
+        }
+
+        if (toPiece !== null && toPiece.color === player.side) {
+            throw new Chat.ErrorMessage(`You can't capture your own piece.`);
+        }
+
+        if (this.board.movePiece(fromPos, toPos)) {
+            this.history.push(`${from} ${to}`);
+            this.sendBoard();
+            this.turn = this.sides[player.oppositeSide()].side;
+        }
+    }
+
+    start() {
+		const nameString = Object.keys(this.playerTable).map(p => this.playerTable[p].name).join(' vs ');
+		this.add(Utils.html`<h2>Chess: ${nameString}</h2>`);
+		this.state = GameState.Active;
+
+		const player = this.sides['white'];
+        if (player) {
+            this.turn = player.id
+        }
+
+		this.add(Utils.html`<h2>${this.playerTable[this.turn].name}'s turn:</h2>`);
+	}
+
+    static convertLetterToChessSymbol(letter: string): string | undefined {
+        const symbols: { [key: string]: string } = {
+            'P': '\u2659',
+            'R': '\u2656',
+            'N': '\u2658',
+            'B': '\u2657',
+            'Q': '\u2655',
+            'K': '\u2654',
+            'p': '\u265F',
+            'r': '\u265C',
+            'n': '\u265E',
+            'b': '\u265D',
+            'q': '\u265B',
+            'k': '\u265A',
+            '.': ' '
+        };
+
+        return symbols[letter];
+    }
+
+    static findExistingRoom(user1: string, user2: string) {
+        return Rooms.get(`chess-${user1}-${user2}`) || Rooms.get(`chess-${user2}-${user1}`);
+    }
+
+    static start(user: User, targetUser: User): Room {
+		const existingRoom = ChessGame.findExistingRoom(user.id, targetUser.id);
+		const options = {
+			modchat: '+' as AuthLevel, isPrivate: 'hidden' as const,
+		};
+
+		const roomid = `chess-${targetUser.id}-${user.id}`;
+		if (existingRoom) existingRoom.log.log = [];
+		const gameRoom = existingRoom ? existingRoom : Rooms.createGameRoom(
+			roomid as RoomID, `[Chess] ${user.name} vs ${targetUser.name}`, options
+		);
+
+        const chess = new ChessGame(gameRoom);
+		gameRoom.game = chess;
+        
+		user.joinRoom(gameRoom.roomid);
+		targetUser.joinRoom(gameRoom.roomid);
+
+        chess.addPlayer(user);
+		chess.addPlayer(targetUser);
+
+        chess.start()
+		return gameRoom;
+	}
+}
 
 export const commands: Chat.ChatCommands = {
 	chess: {
         test(target, room, user) {
-            const board = new ChessBoard();
-            const distribution = board.getDistribution();
-
-            const letters = 'abcdefgh';
-            let output = '<table>';
-
-            // Add the letters of the columns
-            output += '<tr><td></td>';
-            for (let i = 0; i < 8; i++) {
-                output += `<td>${letters[i]}</td>`;
+            const targetUser = Users.get(toID(target));
+            if (targetUser) {
+                ChessGame.start(user, targetUser);
             }
-            output += '</tr>';
+        },
 
-            // Get an string with the chess table distribution
-            for (let i = 0; i < 8; i++) {
-                output += '<tr>';
-                // Add the number of the row
-                output += `<td>${i + 1}</td>`;
-                for (let j = 0; j < 8; j++) {
-                    output += `<td><b>${distribution[i * 8 + j]}</b></td>`;
-                }
-                output += '</tr>';
+        move(target, room, user) {
+            room = this.requireRoom();
+			const game = this.requireGame(ChessGame);
+			const player = game.getPlayer(user);
+			const [location, to] = Utils.splitFirst(target, ',').map(p => p.trim()) as Position[];
+			if (!target || !location || !to) {
+				return this.parse(`/chess help`);
+			}
+			game.move(player, location, to);
+			this.sendReply(`You moved your piece at ${location} to ${to}.`);
+			game.sendBoard();
+        },
+
+        legal(target, room, user) {
+            room = this.requireRoom();
+			const game = this.requireGame(ChessGame);
+			const player = game.getPlayer(user);
+            const location = target.trim() as Position;
+            if (!location) {
+                return this.parse(`/chess help`);
             }
-            output += '</table>';
-        
-            this.sendReply('|raw|' + output);
+
+            game.sendBoarForPosition(player, location)
         },
 
 		'': 'help',
