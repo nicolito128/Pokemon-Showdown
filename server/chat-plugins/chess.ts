@@ -26,7 +26,7 @@ const PieceType = Object.freeze({
     Queen: 0b0101,
     King: 0b0110,
     // Special states
-    PawnEnPassent: 0b0111,
+    PawnEnPassant: 0b0111,
     KingCastle: 0b1000,
     RookCastle: 0b1001,
 });
@@ -89,13 +89,18 @@ class ChessBoard {
     // Offset for the piece type in the bit field. Ex. 0b0001 is a pawn with an offset of 4 bits.
     private bitOffset = 4;
     private maxBinary = 0b1111n;
-    // Bit field for the pawns that can be captured en passant.
-    private pawnsEnPassent: bigint;
+    // list of en passant pawns for black and white side
+    private pawnsEnPassantWhite: bigint;
+    private pawnsEnPassantBlack: bigint;
+    // flag to check if black and white castle already happen
+    private whiteCanCastle = true;
+    private blackCanCastle = true;
 
     constructor() {
         this.whitePieces = 0n;
         this.blackPieces = 0n;
-        this.pawnsEnPassent = 0n;
+        this.pawnsEnPassantWhite = 0n
+        this.pawnsEnPassantBlack = 0n;
 
         this.initializeWhitePieces();
         this.initializeBlackPieces();
@@ -145,15 +150,15 @@ class ChessBoard {
 
     // setPiece sets a piece on the board at the specified index position.
     private setPiece(board: bigint, position: number, type: PieceType): bigint {
-        board = board | (1n << BigInt(position));
-        board = board | (BigInt(type) << this.calculateBitLength(position));
+        board |= (1n << BigInt(position));
+        board |= (BigInt(type) << this.calculateBitLength(position));
         return board;
     }
 
     // removePiece removes a piece from the board at the specified index position.
     private removePiece(board: bigint, position: number): bigint {
-        board = board & ~(1n << BigInt(position));
-        board = board & ~(this.maxBinary << this.calculateBitLength(position));
+        board &= ~(1n << BigInt(position));
+        board &= ~(this.maxBinary << this.calculateBitLength(position));
         return board;
     }
 
@@ -184,7 +189,7 @@ class ChessBoard {
             [PieceType.Bishop]: 'B',
             [PieceType.Queen]: 'Q',
             [PieceType.King]: 'K',
-            [PieceType.PawnEnPassent]: 'P',
+            [PieceType.PawnEnPassant]: 'P',
             [PieceType.KingCastle]: 'K',
             [PieceType.RookCastle]: 'R',
         };
@@ -223,7 +228,7 @@ class ChessBoard {
     }
 
     // getPawnMoves returns the possible moves for a pawn at the specified position.
-    // The pawn can move forward, capture diagonally and move two squares on the first move.
+    // The pawn can move forward, capture diagonally, move two squares on the first move, and perform en passant.
     private getPawnMoves(position: Position, color: Color): Position[] {
         const moves: Position[] = [];
         const { row, col } = positionToCoordinates(position);
@@ -246,6 +251,19 @@ class ChessBoard {
         }
         if (this.isEnemy(coordinatesToPosition({row: row + direction, col: col + 1}), color)) {
             moves.push(coordinatesToPosition({row: row + direction, col: col + 1}));
+        }
+
+        const enPassantRow = color === 'white' ? 4 : 3;
+        if (row === enPassantRow) {
+            const leftPos = coordinatesToPosition({ row, col: col - 1 });
+            const rightPos = coordinatesToPosition({ row, col: col + 1 });
+
+            if (this.isEnemy(leftPos, color) && this.getPieceAt(leftPos)?.type === PieceType.PawnEnPassant) {
+                moves.push(coordinatesToPosition({ row: row + direction, col: col - 1 }));
+            }
+            if (this.isEnemy(rightPos, color) && this.getPieceAt(rightPos)?.type === PieceType.PawnEnPassant) {
+                moves.push(coordinatesToPosition({ row: row + direction, col: col + 1 }));
+            }
         }
 
         return moves;
@@ -410,7 +428,6 @@ class ChessBoard {
 
     // movePiece moves a piece from the from position to the to position.
     // It returns true if the move was successful.
-    // TODO: Add en passant check
     movePiece(from: Position, to: Position): boolean {
         const fromCoords = positionToCoordinates(from);
         const toCoords = positionToCoordinates(to);
@@ -425,6 +442,14 @@ class ChessBoard {
         let piece: Piece | null = this.getPieceAt(from);
         if (!piece) return false;
 
+        // Check for en passant capture
+        if (piece.type === PieceType.Pawn && Math.abs(fromCoords.row - toCoords.row) === 1 && Math.abs(fromCoords.col - toCoords.col) === 1 && this.isEmpty(to)) {
+            const enPassantPos = coordinatesToPosition({ row: fromCoords.row, col: toCoords.col });
+            if (this.isOccupiedBy(enPassantPos, piece.color === 'white' ? 'black' : 'white')) {
+                this.capturePiece(enPassantPos);
+            }
+        }
+
         if (whiteOccupied) {
             this.whitePieces = this.removePiece(this.whitePieces, fromIndex);
             this.whitePieces = this.setPiece(this.whitePieces, toIndex, piece.type);
@@ -433,24 +458,22 @@ class ChessBoard {
             this.blackPieces = this.setPiece(this.blackPieces, toIndex, piece.type);
         }
 
-        // Set en passent for pawn movement
-        if (piece.type === PieceType.Pawn && Math.abs(fromCoords.row - toCoords.row) === 2) {
-            this.pawnsEnPassent = this.setPiece(this.pawnsEnPassent, toIndex, piece.type);
-            return true
+        // Clear en passant flags if necessary
+        if (piece.type === PieceType.Pawn) {
+            if (piece.color === 'white') {
+                this.pawnsEnPassantWhite = 0n;
+                if (fromCoords.row === 1 && toCoords.row === 3) {
+                    this.pawnsEnPassantWhite = this.setPiece(this.pawnsEnPassantWhite, toIndex, PieceType.PawnEnPassant);
+                }
+            } else {
+                this.pawnsEnPassantBlack = 0n;
+                if (fromCoords.row === 6 && toCoords.row === 4) {
+                    this.pawnsEnPassantBlack = this.setPiece(this.pawnsEnPassantBlack, toIndex, PieceType.PawnEnPassant);
+                }
+            }
         }
 
-        // Check if the move is a capture en passent from to
-        if (this.isEnPassant(from, to)) {
-            const enPassentPos = coordinatesToPosition({row: fromCoords.row, col: toCoords.col});
-            this.capturePiece(enPassentPos);
-            this.pawnsEnPassent = 0n;
-            return true;
-        }
-
-        // Clear en passent board
-        this.pawnsEnPassent = 0n;
-
-        return true
+        return true;
     }
 
     // getLegalMoves returns the possible moves for the piece at the specified position.
@@ -476,7 +499,7 @@ class ChessBoard {
 
         switch (piece.type) {
             case PieceType.Pawn:
-            case PieceType.PawnEnPassent:
+            case PieceType.PawnEnPassant:
                 return this.getPawnMoves(position, piece.color);
             case PieceType.Rook:
             case PieceType.RookCastle:
@@ -766,7 +789,7 @@ class ChessGame extends Rooms.RoomGame {
 
     sendBoarForPosition(player: ChessPlayer, pos: Position) {
         if (this.playerTable[player.id]) {
-            const board = this.getBoardWithMoves(player.side, pos)
+            const board = this.getBoard(player.side)
             player.user.sendTo(this.room.roomid, `|fieldhtml|${board}`)
         }
     }
@@ -783,10 +806,18 @@ class ChessGame extends Rooms.RoomGame {
         }
         buf += '</tr>';
 
+        if (side === 'white') {
+            this.reflectDistribution(distribution)
+        }
+
         for (let i = 0; i < 8; i++) {
             buf += '<tr>';
             // Add the number of the row
-            buf += `<td style="min-height: 32px; min-width: 32px;">${i + 1}</td>`;
+            if (side === 'white') {
+                buf += `<td style="min-height: 32px; min-width: 32px;">${8 - i}</td>`;
+            } else {
+                buf += `<td style="min-height: 32px; min-width: 32px;">${i + 1}</td>`;
+            }
             
             for (let j = 0; j < 8; j++) {
                 const elem = distribution[i * 8 + j];
@@ -802,42 +833,17 @@ class ChessGame extends Rooms.RoomGame {
         return buf
     }
 
-    getBoardWithMoves(side: Color, pos: Position): string {
-        const legalMoves = this.board.getLegalMoves(pos);
-        const distribution = this.board.getDistribution();
-        const letters = 'abcdefgh';
-        let buf = '<center><table border=1 style="text-align: center; margin: auto; margin-top: 10px;">';
-
-        // Add the letters of the columns
-        buf += '<tr><td></td>';
+    // reflect the distribution to set the side pieces at bottom side
+    reflectDistribution(dist: string[]) {
+        const reflectedDist = new Array(64).fill('.');
         for (let i = 0; i < 8; i++) {
-            buf += `<td style="min-height: 32px; min-width: 32px;">${letters[i]}</td>`;
-        }
-        buf += '</tr>';
-
-        for (let i = 0; i < 8; i++) {
-            buf += '<tr>';
-            // Add the number of the correct row
-            buf += `<td style="min-height: 32px; min-width: 32px;">${i + 1}</td>`;
-
             for (let j = 0; j < 8; j++) {
-                const elem = distribution[i * 8 + j];
-                buf += `<td style="min-height: 32px; min-width: 32px;">`;
-                // Change button if is a legal move
-                if (legalMoves.includes(coordinatesToPosition({row: i, col: j}))) {
-                    buf += `<button style="min-height: 32px; min-width: 32px; background-color: green;" name="send" value="/chess legal ${coordinatesToPosition({row: i, col: j})}">`;
-                } else {
-                    buf += `<button style="min-height: 32px; min-width: 32px; name="send" value="/chess legal ${coordinatesToPosition({row: i, col: j})}">`;
-                }
-                
-                buf += ChessGame.convertLetterToChessSymbol(elem);
-                buf += '</button>'
-                buf += '</td>';
+                reflectedDist[i * 8 + j] = dist[(7 - i) * 8 + j];
             }
-            buf += '</tr>';
         }
-        buf += '</table></center>';
-        return buf
+        for (let i = 0; i < 64; i++) {
+            dist[i] = reflectedDist[i];
+        }
     }
 
     add(message: string, isHTML = true) {
